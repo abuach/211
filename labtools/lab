@@ -1,0 +1,586 @@
+#!/usr/bin/env bash
+# lab - helper tool for the CPTR 211 Linux labs
+#
+#   lab check <1-9|all>   check your work for a lab
+#   lab break             (Lab 9) break the server for the troubleshooting challenge
+#   lab hint <1-6> [more] (Lab 9) get a hint for a help desk ticket
+#   lab unbreak           undo everything "lab break" did (instructor escape hatch)
+#   lab update            download the newest version of this tool
+#   lab version           show the version
+#
+# Students: you do not need to read or change this file.
+
+LAB_VERSION="1.0"
+COURSE_URL="https://raw.githubusercontent.com/abuach/cptr211-linux/main/labtools"
+STATE_DIR="/var/lib/cptr211"
+
+# ---------------------------------------------------------------- output helpers
+
+if [[ -t 1 ]]; then
+    GREEN=$'\e[32m'; RED=$'\e[31m'; YELLOW=$'\e[33m'; BOLD=$'\e[1m'; DIM=$'\e[2m'; RESET=$'\e[0m'
+else
+    GREEN=""; RED=""; YELLOW=""; BOLD=""; DIM=""; RESET=""
+fi
+
+PASS_COUNT=0
+FAIL_COUNT=0
+WARN_COUNT=0
+
+pass() {
+    echo "  ${GREEN}✔ PASS${RESET}  $1"
+    PASS_COUNT=$((PASS_COUNT + 1))
+}
+
+fail() {
+    echo "  ${RED}✘ FAIL${RESET}  $1"
+    [[ -n "$2" ]] && echo "          ${DIM}↳ Hint: $2${RESET}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+}
+
+warn() {
+    echo "  ${YELLOW}! NOTE${RESET}  $1"
+    [[ -n "$2" ]] && echo "          ${DIM}↳ $2${RESET}"
+    WARN_COUNT=$((WARN_COUNT + 1))
+}
+
+section() {
+    echo
+    echo "${BOLD}$1${RESET}"
+}
+
+# check "description" "hint if it fails" 'shell test to run'
+check() {
+    local desc="$1" hint="$2" test="$3"
+    if eval "$test" >/dev/null 2>&1; then
+        pass "$desc"
+    else
+        fail "$desc" "$hint"
+    fi
+}
+
+# soft_check: same as check, but only prints a note instead of failing
+soft_check() {
+    local desc="$1" note="$2" test="$3"
+    if eval "$test" >/dev/null 2>&1; then
+        pass "$desc"
+    else
+        warn "$desc" "$note"
+    fi
+}
+
+die() {
+    echo "${RED}Error:${RESET} $1" >&2
+    exit 1
+}
+
+# ---------------------------------------------------------------- small test helpers
+
+pkg_installed()  { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
+user_exists()    { id "$1" >/dev/null 2>&1; }
+group_exists()   { getent group "$1" >/dev/null 2>&1; }
+in_group()       { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx "$2"; }
+mode_is()        { [[ "$(stat -c %a "$1" 2>/dev/null)" == "$2" ]]; }
+group_is()       { [[ "$(stat -c %G "$1" 2>/dev/null)" == "$2" ]]; }
+owner_is()       { [[ "$(stat -c %U "$1" 2>/dev/null)" == "$2" ]]; }
+is_locked()      { [[ "$(passwd -S "$1" 2>/dev/null | awk '{print $2}')" == "L" ]]; }
+svc_active()     { systemctl is-active --quiet "$1"; }
+svc_enabled()    { systemctl is-enabled --quiet "$1"; }
+has_acl()        { getfacl -p "$1" 2>/dev/null | grep -qx "$2"; }
+must_change_pw() { chage -l "$1" 2>/dev/null | grep -i "last password change" | grep -qi "must be changed"; }
+
+# An IPv4 address that is not loopback and not a VirtualBox/QEMU NAT address (10.0.2.x),
+# i.e. an address the lab computers can reach.
+has_host_ip() {
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | grep -v '^10\.0\.2\.' | grep -q .
+}
+
+host_ip() {
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -v '^10\.0\.2\.' | head -1
+}
+
+ufw_allows() {
+    ufw status 2>/dev/null | grep -Eq "^($1)[[:space:]]+ALLOW"
+}
+
+# Everything sshd and cron have logged (auth.log, syslog and the journal)
+auth_logs() {
+    cat /var/log/auth.log /var/log/auth.log.1 2>/dev/null
+    journalctl --no-pager -q -t sshd -t sshd-session 2>/dev/null
+    journalctl --no-pager -q -u ssh 2>/dev/null
+}
+
+cron_logs() {
+    cat /var/log/syslog /var/log/syslog.1 2>/dev/null
+    journalctl --no-pager -q -t CRON -t cron 2>/dev/null
+}
+
+# ---------------------------------------------------------------- who is the student?
+
+STUDENT="${SUDO_USER:-$USER}"
+[[ -z "$STUDENT" || "$STUDENT" == "root" ]] && STUDENT="student"
+H="$(getent passwd "$STUDENT" | cut -d: -f6)"
+[[ -z "$H" ]] && H="/home/$STUDENT"
+
+need_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "${DIM}(lab needs administrator rights for this — you may be asked for YOUR password)${RESET}"
+        exec sudo "$0" "$@"
+    fi
+}
+
+header() {
+    echo "${BOLD}════════════════════════════════════════════════════════════${RESET}"
+    echo "${BOLD} CPTR 211 · Linux Lab $1 check${RESET}"
+    echo "  Computer: $(hostname)   Student: $STUDENT"
+    echo "  Date:     $(date '+%Y-%m-%d %H:%M')   Tool version: $LAB_VERSION"
+    echo "${BOLD}════════════════════════════════════════════════════════════${RESET}"
+}
+
+summary() {
+    local total=$((PASS_COUNT + FAIL_COUNT))
+    echo
+    echo "${BOLD}────────────────────────────────────────────────────────────${RESET}"
+    if [[ $FAIL_COUNT -eq 0 ]]; then
+        echo " ${GREEN}${BOLD}All $total checks passed. Nice work!${RESET}"
+    else
+        echo " ${BOLD}Score: $PASS_COUNT / $total${RESET}   (${RED}$FAIL_COUNT to fix${RESET} — read the hints above)"
+    fi
+    echo " Take a screenshot of this window for your submission."
+    echo "${BOLD}────────────────────────────────────────────────────────────${RESET}"
+}
+
+# ================================================================= LAB CHECKS
+
+check_lab1() {
+    section "Lab 1 · Installing Linux"
+    check "Operating system is Ubuntu 26.04 LTS" \
+        "Reinstall using the Ubuntu Server 26.04 LTS ISO (it should already be in your VM's CD/DVD drive)." \
+        'grep -q "VERSION_ID=\"26.04\"" /etc/os-release'
+    check "Server name ends in -linux (yours: $(hostname))" \
+        "Set it with:  sudo hostnamectl set-hostname yourname-linux" \
+        '[[ "$(hostname)" == *-linux ]]'
+    check "User account 'student' exists" \
+        "The account you created during install must be named exactly: student" \
+        'user_exists student'
+    check "'student' is an administrator (in the sudo group)" \
+        "The first account made during install is normally an admin. Ask your instructor." \
+        'in_group student sudo'
+    check "SSH server is installed" \
+        "Run:  sudo apt install -y openssh-server" \
+        'pkg_installed openssh-server'
+    check "SSH server is running" \
+        "Run:  sudo systemctl enable --now ssh" \
+        'svc_active ssh || svc_active ssh.socket'
+    check "VM has a network address the lab computers can reach ($(host_ip))" \
+        "Run  ip a . If there is no 172.27.x.x address, try  sudo reboot . Still none? Tell your instructor." \
+        'has_host_ip'
+    check "VM can reach the internet" \
+        "Try:  ping -c 3 ubuntu.com . If that fails, try  sudo reboot . Still failing? Tell your instructor." \
+        'getent hosts archive.ubuntu.com'
+}
+
+check_lab2() {
+    local d="$H/lab2"
+    section "Lab 2 · Files and folders  (looking in $d)"
+    check "Folder ~/lab2 exists" \
+        "Run:  mkdir ~/lab2" \
+        '[[ -d "$d" ]]'
+    check "Folders documents, projects/website, projects/scripts, archive exist" \
+        "Use mkdir (and mkdir -p for nested folders) inside ~/lab2" \
+        '[[ -d "$d/documents" && -d "$d/projects/website" && -d "$d/projects/scripts" && -d "$d/archive" ]]'
+    check "documents/notes.txt mentions 'case sensitive'" \
+        "Open it with:  nano ~/lab2/documents/notes.txt  (see Part C)" \
+        'grep -qi "case sensitive" "$d/documents/notes.txt"'
+    check "documents/notes-backup.txt is an exact copy of notes.txt" \
+        "Run:  cp ~/lab2/documents/notes.txt ~/lab2/documents/notes-backup.txt" \
+        'cmp -s "$d/documents/notes.txt" "$d/documents/notes-backup.txt"'
+    check "documents/README and documents/readme are two different files" \
+        "Create both with touch. Linux treats upper and lower case as different names." \
+        '[[ -f "$d/documents/README" && -f "$d/documents/readme" ]]'
+    check "projects/website/index.html exists" \
+        "Run:  touch ~/lab2/projects/website/index.html" \
+        '[[ -f "$d/projects/website/index.html" ]]'
+    check "archive/old-notes.txt exists (moved there with mv)" \
+        "See Part D, step 15." \
+        '[[ -f "$d/archive/old-notes.txt" ]]'
+    check "draft.txt is no longer in ~/lab2 (it was moved)" \
+        "mv moves a file; it should not stay behind. See Part D, step 15." \
+        '[[ ! -e "$d/draft.txt" ]]'
+    check "trash-me.txt has been deleted" \
+        "Run:  rm ~/lab2/trash-me.txt" \
+        '[[ ! -e "$d/trash-me.txt" ]]'
+    check "etc-list.txt contains a listing of /etc" \
+        "Run:  ls /etc > ~/lab2/etc-list.txt" \
+        'grep -qx "passwd" "$d/etc-list.txt"'
+    check "Everything in ~/lab2 belongs to you (not root)" \
+        "You used sudo where you didn't need to. Fix with:  sudo chown -R $STUDENT:$STUDENT ~/lab2" \
+        '[[ -d "$d" && -z "$(find "$d" ! -user "$STUDENT" 2>/dev/null)" ]]'
+}
+
+check_lab3() {
+    section "Lab 3 · Software and services"
+    check "Package 'tree' is installed" "Run:  sudo apt install -y tree" 'pkg_installed tree'
+    check "Package 'htop' is installed" "Run:  sudo apt install -y htop" 'pkg_installed htop'
+    check "Package 'nginx' (web server) is installed" "Run:  sudo apt install -y nginx" 'pkg_installed nginx'
+    check "nginx is running" \
+        "Run:  sudo systemctl start nginx   then   systemctl status nginx" \
+        'svc_active nginx'
+    check "nginx starts automatically at boot (enabled)" \
+        "Run:  sudo systemctl enable nginx" \
+        'svc_enabled nginx'
+    check "Your web page /var/www/html/index.html contains 'CPTR 211'" \
+        "Edit it with:  sudo nano /var/www/html/index.html  (see Part C)" \
+        'grep -q "CPTR 211" /var/www/html/index.html'
+    check "The web server actually serves your page" \
+        "Make sure nginx is running, then try:  curl http://localhost" \
+        'curl -s --max-time 5 http://localhost | grep -q "CPTR 211"'
+    soft_check "Time zone has been set (yours: $(timedatectl show -p Timezone --value 2>/dev/null))" \
+        "If you are not really in UTC, run:  sudo timedatectl set-timezone America/New_York  (use yours)" \
+        '[[ "$(timedatectl show -p Timezone --value)" != "Etc/UTC" && "$(timedatectl show -p Timezone --value)" != "UTC" ]]'
+}
+
+check_lab4() {
+    section "Lab 4 · Users and groups"
+    local g u
+    for g in sales hr it; do
+        check "Group '$g' exists" "Run:  sudo addgroup $g" "group_exists $g"
+    done
+    for u in alice bob carol dave erin frank; do
+        check "User '$u' exists with a home folder" "Run:  sudo adduser $u" "user_exists $u && [[ -d /home/$u ]]"
+    done
+    check "alice, bob and frank are in 'sales'" \
+        "Run:  sudo usermod -aG sales alice   (repeat for each user)" \
+        'in_group alice sales && in_group bob sales && in_group frank sales'
+    check "carol and erin are in 'hr'" \
+        "Run:  sudo usermod -aG hr carol   (repeat for erin)" \
+        'in_group carol hr && in_group erin hr'
+    check "dave is in 'it'" "Run:  sudo usermod -aG it dave" 'in_group dave it'
+    check "dave is an administrator (in 'sudo')" "Run:  sudo usermod -aG sudo dave" 'in_group dave sudo'
+    check "erin's account is locked (she is on leave)" "Run:  sudo passwd -l erin" 'is_locked erin'
+    check "frank's account has an expiration date" \
+        "Run:  sudo chage -E \$(date +%Y)-12-31 frank" \
+        'chage -l frank | grep -i "^account expires" | grep -viq never'
+    check "The 'intern' account has been deleted, including its home folder" \
+        "Run:  sudo deluser --remove-home intern" \
+        '! user_exists intern && [[ ! -d /home/intern ]]'
+}
+
+check_lab5() {
+    local c=/srv/company
+    section "Lab 5 · Permissions"
+    check "Folder $c exists" "Run:  sudo mkdir -p /srv/company" '[[ -d $c ]]'
+    check "sales folder: group is 'sales'" "Run:  sudo chgrp sales $c/sales" 'group_is $c/sales sales'
+    check "sales folder: permissions are 2770" "Run:  sudo chmod 2770 $c/sales" 'mode_is $c/sales 2770'
+    check "hr folder: group is 'hr'" "Run:  sudo chgrp hr $c/hr" 'group_is $c/hr hr'
+    check "hr folder: permissions are 2770" "Run:  sudo chmod 2770 $c/hr" 'mode_is $c/hr 2770'
+    check "public folder: group is 'it'" "Run:  sudo chgrp it $c/public" 'group_is $c/public it'
+    check "public folder: permissions are 2775" "Run:  sudo chmod 2775 $c/public" 'mode_is $c/public 2775'
+    check "HR can read the sales folder (ACL group:hr:r-x)" \
+        "Run:  sudo setfacl -R -m g:hr:rX $c/sales" \
+        'has_acl $c/sales "group:hr:r-x"'
+    check "HR can read NEW files in sales too (default ACL)" \
+        "Run:  sudo setfacl -d -m g:hr:rx $c/sales" \
+        'has_acl $c/sales "default:group:hr:r-x"'
+    check "sales/q3-report.txt was created by alice and belongs to group sales" \
+        "Log in as alice (su - alice) and create the file. See Part C." \
+        'owner_is $c/sales/q3-report.txt alice && group_is $c/sales/q3-report.txt sales'
+    check "public/welcome.txt was created by dave and belongs to group it" \
+        "Log in as dave (su - dave) and create the file. See Part C." \
+        'owner_is $c/public/welcome.txt dave && group_is $c/public/welcome.txt it'
+    check "~/lab5/hello.sh is executable" \
+        "Run:  chmod u+x ~/lab5/hello.sh" \
+        '[[ -x "$H/lab5/hello.sh" ]] && head -1 "$H/lab5/hello.sh" | grep -q "^#!"'
+    check "~/lab5/secret.txt has permissions 600 (only you can read it)" \
+        "Run:  chmod 600 ~/lab5/secret.txt" \
+        'mode_is "$H/lab5/secret.txt" 600'
+}
+
+check_lab6() {
+    section "Lab 6 · Samba file sharing"
+    check "Samba is installed" "Run:  sudo apt install -y samba" 'pkg_installed samba'
+    check "You made a backup of smb.conf before editing it" \
+        "Run:  sudo cp /etc/samba/smb.conf /etc/samba/smb.conf.bak" \
+        '[[ -f /etc/samba/smb.conf.bak ]]'
+    check "smb.conf has no errors (testparm)" \
+        "Run:  testparm   and read the error message." \
+        'testparm -s /etc/samba/smb.conf'
+    local s
+    for s in sales hr public; do
+        check "Share [$s] points to /srv/company/$s" \
+            "Check the [$s] section at the bottom of /etc/samba/smb.conf" \
+            "[[ \"\$(testparm -s --section-name=$s --parameter-name=path 2>/dev/null)\" == /srv/company/$s ]]"
+    done
+    check "Samba service (smbd) is running" "Run:  sudo systemctl restart smbd" 'svc_active smbd'
+    check "Samba service starts at boot" "Run:  sudo systemctl enable smbd" 'svc_enabled smbd'
+    local u
+    for u in alice bob carol dave; do
+        check "Samba password set for $u" "Run:  sudo smbpasswd -a $u" "pdbedit -L 2>/dev/null | cut -d: -f1 | grep -qx $u"
+    done
+    check "sales/from-network.txt was created over the network and belongs to group sales" \
+        "Connect to \\\\$(host_ip)\\sales as alice and create the file. See Part D." \
+        '[[ -f /srv/company/sales/from-network.txt ]] && group_is /srv/company/sales/from-network.txt sales'
+}
+
+check_lab7() {
+    section "Lab 7 · Monitoring, logs and firewall"
+    check "~/lab7/health.txt has disk AND memory info" \
+        "Run:  df -h > ~/lab7/health.txt   then   free -h >> ~/lab7/health.txt" \
+        'grep -q "^Filesystem" "$H/lab7/health.txt" && grep -q "^Mem:" "$H/lab7/health.txt"'
+    check "No runaway 'yes' processes are still running" \
+        "Find them with:  pgrep -a yes   and stop them with:  kill <PID>" \
+        '! pgrep -x yes'
+    check "The logs show failed logins for bob (the 'attack' in Part C)" \
+        "From a lab computer terminal, try:  ssh bob@$(host_ip)  and type a WRONG password 3 times." \
+        'auth_logs | grep -qi "failed password for bob"'
+    check "~/lab7/failed-logins.txt contains the failed login lines" \
+        "Run:  sudo grep \"Failed password\" /var/log/auth.log > ~/lab7/failed-logins.txt" \
+        'grep -qi "failed password" "$H/lab7/failed-logins.txt"'
+    check "Firewall (ufw) is turned on" "Run:  sudo ufw enable   (allow SSH FIRST!)" 'ufw status | grep -q "Status: active"'
+    check "Firewall allows SSH" "Run:  sudo ufw allow OpenSSH" 'ufw_allows "OpenSSH|22(/tcp)?"'
+    check "Firewall allows the web server" "Run:  sudo ufw allow \"Nginx HTTP\"" 'ufw_allows "Nginx HTTP|Nginx Full|80(/tcp)?"'
+    check "Firewall allows Samba" "Run:  sudo ufw allow Samba" 'ufw_allows "Samba|445(/tcp)?"'
+}
+
+check_lab8() {
+    section "Lab 8 · Backups and scheduled tasks"
+    local latest
+    latest="$(ls -t /backups/company-*.tar.gz 2>/dev/null | head -1)"
+    check "/backups contains at least one company backup" \
+        "See Part A:  sudo tar -czvf /backups/company-\$(date +%F).tar.gz /srv/company /etc/samba" \
+        '[[ -n "$latest" ]]'
+    check "The newest backup contains the sales report" \
+        "Make sure you back up /srv/company. List a backup with:  tar -tzf <file>" \
+        '[[ -n "$latest" ]] && tar -tzf "$latest" | grep -q "srv/company/sales/q3-report.txt"'
+    check "sales/q3-report.txt was restored after the 'disaster'" \
+        "See Part B: restore it from your backup with tar -xzvf" \
+        '[[ -f /srv/company/sales/q3-report.txt ]]'
+    check "The restored report still belongs to alice and group sales" \
+        "Restore with sudo so tar can put the original owner back." \
+        'owner_is /srv/company/sales/q3-report.txt alice && group_is /srv/company/sales/q3-report.txt sales'
+    check "Backup script /usr/local/sbin/backup-company.sh exists and is executable" \
+        "See Part C. Then:  sudo chmod +x /usr/local/sbin/backup-company.sh" \
+        '[[ -x /usr/local/sbin/backup-company.sh ]] && head -1 /usr/local/sbin/backup-company.sh | grep -q "^#!"'
+    check "The script runs without errors" \
+        "Run it by hand to see the error:  sudo /usr/local/sbin/backup-company.sh" \
+        '/usr/local/sbin/backup-company.sh'
+    check "root's crontab runs the backup script" \
+        "Run:  sudo crontab -e   and add the line from Part D." \
+        'crontab -l -u root 2>/dev/null | grep -v "^[[:space:]]*#" | grep -q backup-company.sh'
+    check "cron has actually run the backup at least once" \
+        "Use the every-2-minutes schedule from Part D and wait a few minutes." \
+        'cron_logs | grep -q "backup-company"'
+    check "The backup is now scheduled nightly at 2:00 AM" \
+        "Change the line in  sudo crontab -e  to start with:  0 2 * * *" \
+        'crontab -l -u root 2>/dev/null | grep -v "^[[:space:]]*#" | grep backup-company.sh | grep -Eq "^0[[:space:]]+2[[:space:]]+\*[[:space:]]+\*[[:space:]]+\*"'
+    soft_check "rsync mirror copy exists in /backups/mirror (optional Challenge)" \
+        "Optional:  sudo rsync -av /srv/company/ /backups/mirror/" \
+        '[[ -d /backups/mirror/sales ]]'
+}
+
+check_lab9() {
+    section "Lab 9 · Part A — Automating new-hire accounts"
+    check "Script ~/lab9/onboard.sh exists and is executable" \
+        "Run:  chmod +x ~/lab9/onboard.sh" \
+        '[[ -x "$H/lab9/onboard.sh" ]]'
+    local spec u g
+    for spec in gina:sales hank:it iris:hr jack:sales; do
+        u="${spec%%:*}"; g="${spec##*:}"
+        check "New hire '$u' exists, has a home folder, and is in '$g'" \
+            "Check newhires.csv, then run:  sudo ./onboard.sh newhires.csv" \
+            "user_exists $u && [[ -d /home/$u ]] && in_group $u $g"
+        # gina logs in during step 8 and picks a new password, so skip her
+        [[ "$u" == "gina" ]] && continue
+        check "'$u' must choose a new password at first login" \
+            "Your script should run:  chage -d 0 \$username" \
+            "must_change_pw $u"
+    done
+
+    section "Lab 9 · Part B — Help desk tickets"
+    if [[ ! -f "$STATE_DIR/broken" ]]; then
+        fail "The server has been broken for the challenge" "Take a snapshot, then run:  sudo lab break"
+        return
+    fi
+    pass "The server was broken on $(cat "$STATE_DIR/broken")"
+    check "Ticket 1: the company website is back up" \
+        "Run:  lab hint 1" \
+        'nginx -t && svc_active nginx && curl -s --max-time 5 http://localhost | grep -q "CPTR 211"'
+    check "Ticket 2: bob can log in again" \
+        "Run:  lab hint 2" \
+        'user_exists bob && ! is_locked bob'
+    check "Ticket 3: alice can get into the sales folder again" \
+        "Run:  lab hint 3" \
+        'in_group alice sales'
+    check "Ticket 4: the HR team can open their folder again" \
+        "Run:  lab hint 4" \
+        'group_is /srv/company/hr hr && mode_is /srv/company/hr 2770'
+    check "Ticket 5: the nightly backup can run again" \
+        "Run:  lab hint 5" \
+        '[[ -x /usr/local/sbin/backup-company.sh ]]'
+    check "Ticket 6: the server is no longer slow" \
+        "Run:  lab hint 6" \
+        '! svc_active riverbend-sync && ! svc_enabled riverbend-sync && ! pgrep -f riverbend-sync'
+}
+
+run_check() {
+    local n="$1"
+    case "$n" in
+        1|2|3|4|5|6|7|8|9)
+            header "$n"
+            "check_lab$n"
+            summary
+            ;;
+        all)
+            header "1-9 (all)"
+            for n in 1 2 3 4 5 6 7 8 9; do "check_lab$n"; done
+            summary
+            ;;
+        *)
+            die "Which lab? Example:  lab check 3"
+            ;;
+    esac
+}
+
+# ================================================================= LAB 9: BREAK / HINT / UNBREAK
+
+NGINX_SITE=/etc/nginx/sites-available/default
+
+do_break() {
+    if [[ -f "$STATE_DIR/broken" && "$1" != "--force" ]]; then
+        echo "The server is already broken (since $(cat "$STATE_DIR/broken"))."
+        echo "If you really want to break it again, run:  sudo lab break --force"
+        exit 1
+    fi
+
+    echo "Checking that Labs 3-8 are finished first..."
+    local missing=0
+    pkg_installed nginx                          || { echo "  ✘ nginx is not installed (Lab 3)"; missing=1; }
+    grep -Eq '^\s*root /var/www/html;' "$NGINX_SITE" 2>/dev/null \
+                                                 || { echo "  ✘ $NGINX_SITE looks different than expected (Lab 3)"; missing=1; }
+    user_exists bob && user_exists alice         || { echo "  ✘ users alice and bob are missing (Lab 4)"; missing=1; }
+    in_group alice sales                         || { echo "  ✘ alice is not in sales (Lab 4)"; missing=1; }
+    [[ -d /srv/company/hr ]]                     || { echo "  ✘ /srv/company/hr is missing (Lab 5)"; missing=1; }
+    [[ -f /usr/local/sbin/backup-company.sh ]]   || { echo "  ✘ the backup script is missing (Lab 8)"; missing=1; }
+    if [[ $missing -eq 1 ]]; then
+        echo
+        die "Finish the labs above first, then run  sudo lab break  again."
+    fi
+
+    mkdir -p "$STATE_DIR"
+    cp -p "$NGINX_SITE" "$STATE_DIR/nginx-default.orig"
+
+    # Ticket 1: typo in the web server's config file
+    sed -i -E '0,/^(\s*)root \/var\/www\/html;/s//\1rooot \/var\/www\/html;/' "$NGINX_SITE"
+    systemctl restart nginx >/dev/null 2>&1
+
+    # Ticket 2: bob's account gets locked
+    passwd -l bob >/dev/null 2>&1
+
+    # Ticket 3: alice is removed from the sales group
+    gpasswd -d alice sales >/dev/null 2>&1
+
+    # Ticket 4: the hr folder's group is changed to root
+    chgrp root /srv/company/hr
+
+    # Ticket 5: the backup script loses its execute permission
+    chmod a-x /usr/local/sbin/backup-company.sh
+
+    # Ticket 6: a "sync agent" service that eats CPU
+    cat > /usr/local/bin/riverbend-sync <<'EOF'
+#!/bin/bash
+# Riverbend file sync agent
+while true; do :; done
+EOF
+    chmod 755 /usr/local/bin/riverbend-sync
+    cat > /etc/systemd/system/riverbend-sync.service <<'EOF'
+[Unit]
+Description=Riverbend file sync agent
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/riverbend-sync
+CPUQuota=60%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now riverbend-sync >/dev/null 2>&1
+
+    date '+%Y-%m-%d %H:%M' > "$STATE_DIR/broken"
+
+    echo
+    echo "${RED}${BOLD}  *** Uh oh. Six things just broke on the Riverbend server. ***${RESET}"
+    echo
+    echo "  The help desk tickets are in Lab 9, Part B."
+    echo "  Stuck on a ticket? Run:  lab hint <ticket number>"
+    echo "  Check your progress:     lab check 9"
+}
+
+do_unbreak() {
+    [[ -f "$STATE_DIR/broken" ]] || die "Nothing to undo — 'lab break' has not been run."
+    [[ -f "$STATE_DIR/nginx-default.orig" ]] && cp -p "$STATE_DIR/nginx-default.orig" "$NGINX_SITE"
+    systemctl restart nginx >/dev/null 2>&1
+    passwd -u bob >/dev/null 2>&1
+    usermod -aG sales alice
+    chgrp hr /srv/company/hr && chmod 2770 /srv/company/hr
+    chmod 755 /usr/local/sbin/backup-company.sh
+    systemctl disable --now riverbend-sync >/dev/null 2>&1
+    rm -f /etc/systemd/system/riverbend-sync.service /usr/local/bin/riverbend-sync
+    systemctl daemon-reload
+    rm -f "$STATE_DIR/broken"
+    echo "Everything 'lab break' changed has been put back."
+}
+
+do_hint() {
+    local t="$1" more="$2"
+    case "$t" in
+        1)  echo "Ticket 1 hint: Start with  systemctl status nginx . It's not running — so try to start it and read the error."
+            [[ -n "$more" ]] && echo "More: Run  sudo nginx -t . It tells you which config file and which LINE NUMBER has the problem. Open that file with sudo nano, fix the typo, then  sudo systemctl restart nginx" ;;
+        2)  echo "Ticket 2 hint: Bob says his password is right. What is the STATUS of his account? Try  sudo passwd -S bob  (look at the 2nd column)."
+            [[ -n "$more" ]] && echo "More: 'L' means Locked. You learned to lock AND unlock accounts in Lab 4." ;;
+        3)  echo "Ticket 3 hint: Bob can get in but alice can't, so the folder is probably fine. What's different about alice? Try  groups alice  and compare with  groups bob"
+            [[ -n "$more" ]] && echo "More: Add her back to the group the same way you did in Lab 4 (remember the -a!)." ;;
+        4)  echo "Ticket 4 hint: Everybody in HR is affected, so look at the folder itself:  ls -ld /srv/company/hr"
+            [[ -n "$more" ]] && echo "More: Compare it with  ls -ld /srv/company/sales . Which column is wrong? chgrp changes a folder's group." ;;
+        5)  echo "Ticket 5 hint: Try running the script yourself:  sudo /usr/local/sbin/backup-company.sh  — what error do you get?"
+            [[ -n "$more" ]] && echo "More: 'Permission denied' on a script usually means it lost its x (execute) permission. Look with  ls -l  and fix with chmod." ;;
+        6)  echo "Ticket 6 hint: Open  htop  (or top) and look at the CPU% column. What's at the top of the list?"
+            [[ -n "$more" ]] && echo "More: Killing the process won't keep it gone — a SERVICE restarts it. Use  systemctl status <PID>  to find which service, then stop AND disable it." ;;
+        *)  die "Which ticket? Example:  lab hint 3" ;;
+    esac
+    [[ -z "$more" ]] && echo "${DIM}(Still stuck? Run:  lab hint $t more)${RESET}"
+}
+
+# ================================================================= MAIN
+
+do_update() {
+    curl -fsSL "$COURSE_URL/lab" -o /tmp/lab.new || die "Could not download the update. Is the VM online?"
+    bash -n /tmp/lab.new || die "The downloaded file is damaged. Try again later."
+    install -m 755 /tmp/lab.new /usr/local/bin/lab
+    rm -f /tmp/lab.new
+    echo "Updated. $(/usr/local/bin/lab version)"
+}
+
+usage() {
+    cat <<EOF
+${BOLD}lab${RESET} — CPTR 211 Linux lab helper (version $LAB_VERSION)
+
+  lab check <1-9>       Check your work for a lab, e.g.  lab check 3
+  lab check all         Check every lab at once
+  lab break             Lab 9 only: break the server for the troubleshooting challenge
+  lab hint <1-6>        Lab 9 only: a hint for a help desk ticket (add "more" for a bigger hint)
+  lab update            Download the newest version of this tool
+  lab version           Show the version
+EOF
+}
+
+case "$1" in
+    check)    need_root "$@"; run_check "$2" ;;
+    break)    need_root "$@"; do_break "$2" ;;
+    unbreak)  need_root "$@"; do_unbreak ;;
+    hint)     do_hint "$2" "$3" ;;
+    update)   need_root "$@"; do_update ;;
+    version)  echo "lab version $LAB_VERSION" ;;
+    ""|help|-h|--help) usage ;;
+    *)        echo "Unknown command: $1"; echo; usage; exit 1 ;;
+esac
