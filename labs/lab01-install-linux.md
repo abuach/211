@@ -148,7 +148,7 @@ Your instructor made a tool called `lab` that checks your work and tells you wha
 > 💡 `sudo` asks with **`[sudo: authenticate] Password:`**. Unlike the login prompt, it shows a **`*` for each character** you type.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/abuach/cptr211-linux/main/labtools/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/abuach/211/main/labtools/install.sh | sudo bash
 ```
 
 Then run:

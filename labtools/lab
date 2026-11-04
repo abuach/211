@@ -11,7 +11,7 @@
 # Students: you do not need to read or change this file.
 
 LAB_VERSION="1.0"
-COURSE_URL="https://raw.githubusercontent.com/abuach/cptr211-linux/main/labtools"
+COURSE_URL="https://raw.githubusercontent.com/abuach/211/main/labtools"
 STATE_DIR="/var/lib/cptr211"
 
 # ---------------------------------------------------------------- output helpers

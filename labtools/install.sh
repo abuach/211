@@ -1,9 +1,9 @@
 #!/bin/bash
 # Installs the CPTR 211 "lab" helper tool into /usr/local/bin
 # Students run this once (Lab 1, Part F):
-#   curl -fsSL https://raw.githubusercontent.com/abuach/cptr211-linux/main/labtools/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/abuach/211/main/labtools/install.sh | sudo bash
 
-COURSE_URL="https://raw.githubusercontent.com/abuach/cptr211-linux/main/labtools"
+COURSE_URL="https://raw.githubusercontent.com/abuach/211/main/labtools"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Please run this with sudo."
