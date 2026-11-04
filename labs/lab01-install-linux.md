@@ -29,33 +29,36 @@ Log in to a CS Lab computer, open **Firefox**, and log in to **https://proxmox.c
 ## Part A: Start the VM and install Ubuntu Server (≈25 min, about 10 of it waiting)
 
 1. In Proxmox, click your **Ubuntu Server** VM: **`cptr211-yourusername-u26.04s`** (the one ending in **`-u26.04s`**).
-2. Click **▶ Start** (top right). Then click **Console** in the VM's menu on the left. You'll see the VM's screen right inside Firefox.
+2. **Check the install disc.** Click **Hardware** in the VM's menu on the left. The **CD/DVD Drive** line must show **`ubuntu-26.04.1-live-server-amd64.iso`**.
+   - If it shows something else (like a Windows ISO) or says **none**: double-click **CD/DVD Drive** → choose **Use CD/DVD disc image file (iso)** → **Storage:** `nfs-isos` → **ISO image:** `ubuntu-26.04.1-live-server-amd64.iso` → **OK**.
+   - If the VM is already running, click **Stop** at the top first, then fix the disc.
+3. Click **▶ Start** (top right). Then click **Console** in the VM's menu on the left. You'll see the VM's screen right inside Firefox.
 
 > 💡 **There's no mouse in the installer.** Click once inside the black console screen. Then use the **arrow keys** to move, **Enter** to choose, **Space** to check a box, and **Tab** to jump between items.
 
-3. At the menu, choose **Try or Install Ubuntu Server** and press **Enter**. Wait for the installer to load (1-2 minutes).
+4. At the menu, choose **Try or Install Ubuntu Server** and press **Enter**. Wait for the installer to load (1-2 minutes).
 
 Now answer the installer's questions. Each screen ends with **[ Done ]** at the bottom. Highlight it and press **Enter** to go to the next screen.
 
 | # | Screen | What to do |
 |---|---|---|
-| 4 | **Language** | **English** → Enter |
-| 5 | **Installer update available** | Choose **Continue without updating** |
-| 6 | **Keyboard configuration** | Leave as **English (US)** → **Done** |
-| 7 | **Choose type of installation** | Leave **Ubuntu Server** selected → **Done** |
-| 8 | **Network configuration** | You should see one network card with an address like `172.27.60.123/18`. **Write down that address** (without the `/18`). Then **Done**. |
-| 9 | **Proxy configuration** | Leave blank → **Done** |
-| 10 | **Ubuntu archive mirror** | Wait until it says the mirror test passed → **Done** |
-| 11 | **Guided storage configuration** | Leave **Use an entire disk** selected → **Done** |
-| 12 | **Storage configuration** (summary) | **Done**, then on the warning box choose **Continue** |
-| 13 | **Profile configuration** | See below ⬇️ |
-| 14 | **Upgrade to Ubuntu Pro** | Leave **Skip for now** → **Continue** |
-| 15 | **SSH configuration** | ⚠️ Press **Space** to check **[X] Install OpenSSH server**. Leave "Allow password authentication" checked. → **Done** |
-| 16 | **Featured server snaps** | Don't select anything → **Done** |
+| 5 | **Language** | **English** → Enter |
+| 6 | **Installer update available** | Choose **Continue without updating** |
+| 7 | **Keyboard configuration** | Leave as **English (US)** → **Done** |
+| 8 | **Choose type of installation** | Leave **Ubuntu Server** selected → **Done** |
+| 9 | **Network configuration** | You should see one network card with an address like `172.27.60.123/18`. **Write down that address** (without the `/18`). Then **Done**. |
+| 10 | **Proxy configuration** | Leave blank → **Done** |
+| 11 | **Ubuntu archive mirror** | Wait until it says the mirror test passed → **Done** |
+| 12 | **Guided storage configuration** | Leave **Use an entire disk** selected → **Done** |
+| 13 | **Storage configuration** (summary) | **Done**, then on the warning box choose **Continue** |
+| 14 | **Profile configuration** | See below ⬇️ |
+| 15 | **Upgrade to Ubuntu Pro** | Leave **Skip for now** → **Continue** |
+| 16 | **SSH configuration** | ⚠️ Press **Space** to check **[X] Install OpenSSH server**. Leave "Allow password authentication" checked. → **Done** |
+| 17 | **Featured server snaps** | Don't select anything → **Done** |
 
 > 💬 **"Use an entire disk" erases the disk?!** Only your VM's *virtual* 25 GB disk, which is empty. Nothing else is touched.
 
-**Step 13, Profile configuration.** Type these exactly:
+**Step 14, Profile configuration.** Type these exactly:
 
 | Field | What to type | Example |
 |---|---|---|
@@ -67,19 +70,19 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
 
 > ⚠️ **Your server is on the CS department network**, so pick a real password, not `password123`. **Write it down.** There's no "forgot password" link on a Linux server.
 
-17. The installer now copies files. This takes **5-15 minutes**. ☕ While you wait, read the **Windows ↔ Linux** table above and the "prompt" table in Part B below.
-18. When the top says **Installation complete!**, **don't** press Reboot yet. First, **take the install disc out**:
+18. The installer now copies files. This takes **5-15 minutes**. ☕ While you wait, read the **Windows ↔ Linux** table above and the "prompt" table in Part B below.
+19. When the top says **Installation complete!**, **don't** press Reboot yet. First, **take the install disc out**:
     - In Proxmox, click **Hardware** in the VM's menu on the left
     - Double-click **CD/DVD Drive**
     - Choose **Do not use any media** → **OK**
-19. Go back to **Console**, highlight **[ Reboot Now ]**, and press **Enter**.
+20. Go back to **Console**, highlight **[ Reboot Now ]**, and press **Enter**.
     - If you see *"Please remove the installation medium, then press ENTER"*, just press **Enter**.
 
 ---
 
 ## Part B: First login (≈4 min)
 
-20. The VM restarts. When you see a line like:
+21. The VM restarts. When you see a line like:
     ```
     maria-linux login:
     ```
@@ -89,7 +92,7 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
 
 > 💡 **Messages appeared after the login prompt?** Sometimes a few lines (mentioning `cloud-init` or `ci-info`) print *after* the login prompt shows up. They're harmless. Press **Enter** to get a fresh `login:` prompt.
 
-21. You're in! You'll see a welcome message and then a **prompt**:
+22. You're in! You'll see a welcome message and then a **prompt**:
     ```
     student@maria-linux:~$
     ```
@@ -102,7 +105,7 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
     | `~` | which folder you're in (`~` means *your home folder*) |
     | `$` | you are a normal user. (`#` would mean you're the all-powerful **root** user) |
 
-22. Type your first commands. Press **Enter** after each one:
+23. Type your first commands. Press **Enter** after each one:
     ```bash
     whoami
     hostname
@@ -110,7 +113,7 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
     ```
     - `whoami` → who am I logged in as?
     - `hostname` → what's this computer's name?
-    - `ip a` → show my network addresses (like `ipconfig`). Find the line that says `inet 172.27.___.___`. **That's your server's address.** Make sure it matches what you wrote down in step 8.
+    - `ip a` → show my network addresses (like `ipconfig`). Find the line that says `inet 172.27.___.___`. **That's your server's address.** Make sure it matches what you wrote down in step 9.
 
 ---
 
@@ -118,18 +121,18 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
 
 The Proxmox console works, but it's awkward, and **copy/paste doesn't work well there.** Real sysadmins almost never sit at the server's screen. They connect remotely with **SSH**. It's like Remote Desktop, but text only.
 
-23. Leave the Proxmox tab open. On the **lab computer**, open a terminal: press **Ctrl + Alt + T** (or click **Activities**, type **Terminal**, and press Enter).
+24. Leave the Proxmox tab open. On the **lab computer**, open a terminal: press **Ctrl + Alt + T** (or click **Activities**, type **Terminal**, and press Enter).
 
-24. Type this, using **your** server's address:
+25. Type this, using **your** server's address:
     ```bash
     ssh student@172.27.60.123
     ```
-25. The first time, it asks:
+26. The first time, it asks:
     ```
     Are you sure you want to continue connecting (yes/no/[fingerprint])?
     ```
     Type **`yes`** and press Enter. This saves the server's "ID card" so your account recognizes it next time.
-26. Type your **server's** password (the one you just made, not your lab password). It's invisible again! Press Enter.
+27. Type your **server's** password (the one you just made, not your lab password). It's invisible again! Press Enter.
 
 You should see the same `student@maria-linux:~$` prompt, but now **inside the terminal window**. 🎉
 
@@ -164,8 +167,8 @@ You'll see a list of ✔ PASS and ✘ FAIL lines. Each FAIL includes a **hint** 
 
 A **snapshot** saves the exact state of your VM so you can go back to it if something breaks. It's like a Windows **System Restore point** for the whole computer. **Always take a snapshot before risky changes.**
 
-27. In Proxmox, click **Snapshots** in your VM's menu on the left.
-28. Click **Take Snapshot**.
+28. In Proxmox, click **Snapshots** in your VM's menu on the left.
+29. Click **Take Snapshot**.
     - **Name:** `lab1-fresh-install` (snapshot names can't have spaces)
     - Leave **Include RAM** unchecked
     - Click **Take Snapshot** and wait for the task to say **OK**
@@ -193,8 +196,8 @@ A **snapshot** saves the exact state of your VM so you can go back to it if some
 |---|---|
 | I can't log in to Proxmox, or I don't see my VM | Check that the realm says **CS-LDAP**. If it still doesn't work, tell your instructor. |
 | The console is black | Click inside it and press **Enter**. If the VM isn't running, click **▶ Start**. |
-| After rebooting, the **installer** started again | The install disc was still in. Do step 18 (Hardware → CD/DVD Drive → Do not use any media), then click **Reboot** at the top of Proxmox. |
-| In step 8, the network card has **no address** | Wait 30 seconds. If it still has none, finish the install anyway and tell your instructor. |
+| After rebooting, the **installer** started again | The install disc was still in. Do step 19 (Hardware → CD/DVD Drive → Do not use any media), then click **Reboot** at the top of Proxmox. |
+| In step 9, the network card has **no address** | Wait 30 seconds. If it still has none, finish the install anyway and tell your instructor. |
 | `ssh: connect to host ... Connection timed out` | Check the address with `ip a` *in the Proxmox console*. Make sure you typed it correctly. |
 | `ssh: Connection refused` | The SSH server isn't installed. In the Proxmox console, run `sudo apt install -y openssh-server` |
 | `Permission denied, please try again` | Wrong password. Use your **server's** password (not your lab password). The username is `student`. |
