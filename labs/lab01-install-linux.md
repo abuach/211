@@ -183,10 +183,8 @@ A **snapshot** saves the exact state of your VM so you can go back to it if some
 
 1. A **screenshot** of `lab check 1` showing all checks passing
 2. Answers to these questions (a few sentences each):
-   1. What does the `$` at the end of the prompt tell you? What would `#` mean?
-   2. Why is it better to manage a server through SSH than by sitting at its screen? Give two reasons.
-   3. Compare installing Ubuntu Server to installing Windows Server. What was similar? What was different?
-   4. What is a snapshot, and when would a sysadmin take one?
+   1. Compare installing Ubuntu Server to installing Windows Server. What was similar? What was different?
+   2. What is a snapshot, and when would a sysadmin take one?
 
 ---
 
