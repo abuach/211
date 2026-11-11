@@ -39,7 +39,7 @@ Your server runs on the department's **Proxmox** system, so it stays on even whe
 In Lab 1 you'll install a small tool called `lab`. After each lab, run:
 
 ```bash
-lab check 3
+lab check [LABNUMBER]
 ```
 
 (Use the lab's number.) It prints ✔ PASS or ✘ FAIL for each part of the lab, and every FAIL comes with a **hint** telling you what to fix. When everything passes, take a screenshot for your submission.
