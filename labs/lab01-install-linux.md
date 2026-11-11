@@ -125,7 +125,7 @@ The Proxmox console works, but it's awkward, and **copy/paste doesn't work well 
 
 25. Type this, using **your** server's address:
     ```bash
-    ssh student@172.27.60.123
+    ssh student@[YOURADDRESS-WITHOUTTHEBRACKETS]
     ```
 26. The first time, it asks:
     ```
