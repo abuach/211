@@ -243,7 +243,7 @@ WSL: they can run Ubuntu on a Windows laptop to practice outside the lab.
 
 ## Where Linux runs today
 
-- **Every one** of the world's 500 fastest supercomputers (since 2017)
+- **Every one** of the world's 500 fastest supercomputers (since 2017; source: TOP500.org)
 - **Most of the cloud** and most web servers
 - **Android** phones: billions of devices
 - Routers, smart TVs, cars, the Steam Deck, the Mars helicopter *Ingenuity*

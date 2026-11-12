@@ -71,12 +71,14 @@ Now answer the installer's questions. Each screen ends with **[ Done ]** at the 
 > ⚠️ **Your server is on the CS department network**, so pick a real password, not `password123`. **Write it down.** There's no "forgot password" link on a Linux server.
 
 18. The installer now copies files. This takes **5-15 minutes**. ☕ While you wait, read the **Windows ↔ Linux** table above and the "prompt" table in Part B below.
-19. When the top says **Installation complete!**, **don't** press Reboot yet. First, **take the install disc out**:
+19. When the top says **Installation complete!**, highlight **[ Reboot Now ]** and press **Enter**.
+    - ⚠️ **Leave the install disc in until the next step tells you to remove it.** The installer is still running from the disc, so taking it out early crashes it with `SQUASHFS error` messages.
+20. Wait for *"Please remove the installation medium, then press ENTER"*. Now **take the install disc out**:
     - In Proxmox, click **Hardware** in the VM's menu on the left
     - Double-click **CD/DVD Drive**
     - Choose **Do not use any media** → **OK**
-20. Go back to **Console**, highlight **[ Reboot Now ]**, and press **Enter**.
-    - If you see *"Please remove the installation medium, then press ENTER"*, just press **Enter**.
+    - Go back to **Console**, click inside it, and press **Enter**.
+    - Nothing happening after a minute? Click **Reset** at the top of Proxmox.
 
 ---
 
@@ -194,7 +196,8 @@ A **snapshot** saves the exact state of your VM so you can go back to it if some
 |---|---|
 | I can't log in to Proxmox, or I don't see my VM | Check that the realm says **CS-LDAP**. If it still doesn't work, tell your instructor. |
 | The console is black | Click inside it and press **Enter**. If the VM isn't running, click **▶ Start**. |
-| After rebooting, the **installer** started again | The install disc was still in. Do step 19 (Hardware → CD/DVD Drive → Do not use any media), then click **Reboot** at the top of Proxmox. |
+| `SQUASHFS error: failed to read block` fills the screen | The install disc was removed while the installer was still running. If you already saw **Installation complete!**, make sure the CD/DVD Drive says **Do not use any media**, then click **Reset** at the top of Proxmox. It should boot to a login prompt. If you didn't reach *Installation complete!*, put the disc back in (step 2) and reinstall. |
+| After rebooting, the **installer** started again | The install disc was still in. Do step 20 (Hardware → CD/DVD Drive → Do not use any media), then click **Reset** at the top of Proxmox. |
 | In step 9, the network card has **no address** | Wait 30 seconds. If it still has none, finish the install anyway and tell your instructor. |
 | `ssh: connect to host ... Connection timed out` | Check the address with `ip a` *in the Proxmox console*. Make sure you typed it correctly. |
 | `ssh: Connection refused` | The SSH server isn't installed. In the Proxmox console, run `sudo apt install -y openssh-server` |
