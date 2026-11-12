@@ -125,9 +125,9 @@ The Proxmox console works, but it's awkward, and **copy/paste doesn't work well 
 
 24. Leave the Proxmox tab open. On the **lab computer**, open a terminal: press **Ctrl + Alt + T** (or click **Activities**, type **Terminal**, and press Enter).
 
-25. Type this, using **your** server's address:
+25. Type this, using **your** server's IP address that you wrote down during network configuration (it looks like 172.27.60.123) :
     ```bash
-    ssh student@[YOURADDRESS-WITHOUTTHEBRACKETS]
+    ssh student@[YOUR-IP-ADDRESS-HERE-WITHOUT-THE-BRACKETS]
     ```
 26. The first time, it asks:
     ```
